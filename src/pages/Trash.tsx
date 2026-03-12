@@ -112,7 +112,7 @@ export default function Trash() {
     swc_transfer_modes:    "transfer_modes",
     swc_crypto_exchanges:  "crypto_exchanges",
     swc_metal_platforms:   "metal_platforms",
-    swc_re_platforms:      "metal_platforms",
+    swc_re_platforms:      "real_estate_platforms",
   };
 
   const [importing, setImporting] = useState(false);
@@ -174,18 +174,31 @@ export default function Trash() {
           return;
         }
 
-        if (!confirm(`Import data from ${raw._meta?.exportedAt ? new Date(raw._meta.exportedAt).toLocaleDateString() : "this backup"}?
-
-This will ADD all records from the backup into your current account. Existing records will be overwritten if they share the same ID.`)) return;
-
-        setImporting(true);
-        let total = 0; let done = 0;
-
-        // Count total records
+        // Count total records and build summary
+        let total = 0;
+        const summary: string[] = [];
         for (const [key, table] of Object.entries(TABLE_MAP)) {
           const items = raw[key];
-          if (Array.isArray(items)) total += items.length;
+          if (Array.isArray(items) && items.length > 0) {
+            total += items.length;
+            summary.push(`• ${table.replace(/_/g, " ")}: ${items.length}`);
+          }
         }
+        if (raw.swc_transfer_modes) summary.push(`• transfer modes`);
+        if (raw.swc_crypto_exchanges) summary.push(`• crypto exchanges`);
+        if (raw.swc_metal_platforms) summary.push(`• metal platforms`);
+
+        const confirmMsg = `Import data from ${raw._meta?.exportedAt ? new Date(raw._meta.exportedAt).toLocaleDateString() : "this backup"}?
+
+Records to be imported (${total} total):
+${summary.join("\n")}
+
+This will ADD all records from the backup into your current account. Existing records will be overwritten if they share the same ID.`;
+
+        if (!confirm(confirmMsg)) return;
+
+        setImporting(true);
+        let done = 0;
 
         // Upsert array tables
         for (const [key, table] of Object.entries(TABLE_MAP)) {
@@ -224,13 +237,17 @@ This will ADD all records from the backup into your current account. Existing re
         action={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="gap-2" onClick={handleExportData}><Download className="w-4 h-4"/>Export Data</Button>
-            <label className={`cursor-pointer ${importing ? "opacity-50 pointer-events-none" : ""}`}>
-              <Button variant="outline" size="sm" className="gap-2 pointer-events-none">
+            <>
+              <Button
+                variant="outline" size="sm" className="gap-2"
+                disabled={importing}
+                onClick={() => { if (!importing) document.getElementById("swc-import-input")?.click(); }}
+              >
                 {importing ? <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"/> : <Upload className="w-4 h-4"/>}
                 {importing ? "Importing..." : "Import Data"}
               </Button>
-              <input type="file" accept=".json" className="hidden" onChange={handleImportData} disabled={importing}/>
-            </label>
+              <input id="swc-import-input" type="file" accept=".json" className="hidden" onChange={handleImportData}/>
+            </>
             <Button variant="destructive" size="sm" className="gap-2" onClick={()=>setClearConfirm(true)} disabled={items.length===0}><Trash2 className="w-4 h-4"/>Empty Trash</Button>
           </div>
         } />
@@ -303,4 +320,7 @@ This will ADD all records from the backup into your current account. Existing re
       </Dialog>
     </div>
   );
+}
+function removeFromTrash(id: string) {
+  sbDeleteFromTrash(id);
 }

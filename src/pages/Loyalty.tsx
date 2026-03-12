@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Star, Plus, Trash2, Edit2, Gift, DollarSign, ChevronDown, ChevronUp, CreditCard, Tag, Percent, BarChart2, Filter, Calendar } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { useDB, LoyaltyProgram, LoyaltyTx } from "@/lib/database";
 
 const REDEEM_METHODS: { value: LoyaltyTx["redeemMethod"]; label: string; icon: string }[] = [

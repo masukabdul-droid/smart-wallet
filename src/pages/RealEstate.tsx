@@ -287,9 +287,9 @@ export default function RealEstate() {
               <div className="space-y-1.5"><Label>Transaction Fees</Label><Input type="number" value={form.transactionFees} onChange={e=>setForm((f:any)=>({...f,transactionFees:e.target.value}))} className="bg-background border-border"/></div>
             </div>
             <div className="space-y-1.5"><Label>Auto-receive rent to account</Label>
-              <Select value={form.rentalAccountId} onValueChange={v=>setForm((f:any)=>({...f,rentalAccountId:v}))}>
+              <Select value={form.rentalAccountId||"_none"} onValueChange={v=>setForm((f:any)=>({...f,rentalAccountId:v==="_none"?"":v}))}>
                 <SelectTrigger className="bg-background border-border"><SelectValue placeholder="Hold balance in property"/></SelectTrigger>
-                <SelectContent><SelectItem value="">Hold balance in property</SelectItem>{accounts.map(a=><SelectItem key={a.id} value={a.id}>{a.name} — {a.currency} {getAccountBalance(a.id).toLocaleString()} avail.</SelectItem>)}</SelectContent>
+                <SelectContent><SelectItem value="_none">Hold balance in property</SelectItem>{accounts.map(a=><SelectItem key={a.id} value={a.id}>{a.name} — {a.currency} {getAccountBalance(a.id).toLocaleString()} avail.</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5"><Label>Color</Label>

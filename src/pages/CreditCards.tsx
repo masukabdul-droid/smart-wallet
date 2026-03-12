@@ -527,9 +527,9 @@ export default function CreditCards() {
             </div>
             {repayForm.method==="bank_account" && (
               <div className="space-y-1.5"><Label>Deduct from Account</Label>
-                <Select value={repayForm.sourceAccountId} onValueChange={v=>setRepayForm(f=>({...f,sourceAccountId:v}))}>
+                <Select value={repayForm.sourceAccountId||"_none"} onValueChange={v=>setRepayForm(f=>({...f,sourceAccountId:v==="_none"?"":v}))}>
                   <SelectTrigger className="bg-background border-border"><SelectValue placeholder="Select account"/></SelectTrigger>
-                  <SelectContent><SelectItem value="">Don't deduct</SelectItem>{accounts.map(a=><SelectItem key={a.id} value={a.id}>{a.name} — {a.currency} {getAccountBalance(a.id).toLocaleString()} avail.</SelectItem>)}</SelectContent>
+                  <SelectContent><SelectItem value="_none">Don't deduct</SelectItem>{accounts.map(a=><SelectItem key={a.id} value={a.id}>{a.name} — {a.currency} {getAccountBalance(a.id).toLocaleString()} avail.</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}

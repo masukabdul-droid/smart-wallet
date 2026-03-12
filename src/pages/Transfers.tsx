@@ -32,6 +32,24 @@ export default function Transfers() {
 
   const fromAcc = (id: string) => accounts.find(a=>a.id===id);
 
+const getAccountBalance = (id: string) => {
+  const account = accounts.find(a => a.id === id);
+  if (!account) return 0;
+
+  // Sum all sent amounts + fees from this account
+  const sent = transfers
+    .filter(t => t.fromAccountId === id)
+    .reduce((s, t) => s + t.amountSent + t.fee, 0);
+
+  // Sum all received amounts to this account
+  const received = transfers
+    .filter(t => t.toAccountId === id)
+    .reduce((s, t) => s + t.amountReceived, 0);
+
+  // Start from 0 if no initial balance
+  return received - sent;
+};
+
   const handleSave = () => {
     const sent = parseFloat(form.amountSent);
     if (!form.fromAccountId || !sent) return;
