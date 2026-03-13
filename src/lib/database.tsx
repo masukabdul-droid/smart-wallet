@@ -78,9 +78,22 @@ export interface SavingsGoal {
 }
 
 export interface SavingsTransaction {
-  id: string; date: string; amount: number; note: string;
-  type: "deposit" | "withdrawal" | "profit";
-  fromAccountId?: string; fromTransferId?: string;
+  id: string
+  date: string
+  amount: number
+  type: "deposit" | "withdrawal" | "profit"
+  note?: string
+
+  // money source
+  fromAccountId?: string
+  fromCreditCardId?: string
+
+  // money destination
+  toAccountId?: string
+  toCreditCardId?: string
+
+  // optional charges
+  fees?: number
 }
 
 export interface FixedDeposit {
@@ -528,7 +541,7 @@ interface DB {
   savingsGoals: SavingsGoal[];
   addSavingsGoal: (g: Omit<SavingsGoal,"id"|"transactions">) => void;
   updateSavingsGoal: (id: string, u: Partial<SavingsGoal>) => void;
-  addSavingsTx: (id: string, tx: Omit<SavingsTransaction,"id">) => void;
+  addSavingsTx: (goalId: string, tx: Omit<SavingsTransaction, "id">)=>void;
   deleteSavingsGoal: (id: string) => void;
 
   fixedDeposits: FixedDeposit[];
@@ -767,7 +780,7 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
   const setCashOpeningBalance = useCallback((val: number | ((p: number) => number)) => {
     setCashOpeningBalanceRaw(prev => {
       const next = typeof val === "function" ? val(prev) : val;
-      sbUpsertSingleton("transfer_modes", userId, { cash_opening: next });
+      sbUpsertSingleton("cash_opening_balance", userId, { cash_opening: next });
       return next;
     });
   }, [userId]);
@@ -845,7 +858,7 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
       sbGetSingleton<{modes:string[]}>("transfer_modes", userId, {modes:["Bank Transfer","SWIFT","Western Union","Al Ansari Exchange","Al Fardan Exchange","Wise","Remitly","Cash Deposit","Online Transfer"]}),
       sbGetSingleton<{exchanges:string[]}>("crypto_exchanges", userId, {exchanges:["Binance","Kraken","Coinbase","OKX","Bybit","KuCoin","Gate.io","Bitget","Local Exchange","OTC","Other"]}),
       sbGetSingleton<{platforms:string[]}>("metal_platforms", userId, {platforms:["Dubai Gold Souk","DMCC","Kitco","BullionVault","Local Jeweler","Bank","ENBD","Other"]}),
-      sbGetSingleton<{cash_opening:number}>("transfer_modes", userId, {cash_opening:0}),
+      sbGetSingleton<{cash_opening:number}>("cash_opening_balance", userId, {cash_opening:0}),
     ]).then(([
       accts, txns, bdgs, gls, svgs, fds, ccs, rules, bills, lns, trs,
       crypto, metals, props, bizs, cash, loyalty, comps, discounts, lenders,
@@ -877,6 +890,9 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
       const co = (cashOpening as any).cash_opening || 0;
       setCashOpeningBalanceRaw(co);
 
+      // Ensure cash entries are loaded
+      if (cache.cashEntries?.length) setCashEntriesRaw(cache.cashEntries);
+
       // Save fresh data to session cache for instant reload next time
       saveCache({
         accounts: accts, transactions: txns, budgets: bdgs, goals: gls,
@@ -890,6 +906,7 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
         cryptoExchanges: cexchanges.exchanges || [],
         metalPlatforms: mplatforms.platforms || [],
         cashOpeningBalance: co,
+        // cashEntries: cash,
       });
       setLoading(false);
     }).catch(e => { console.error("DB load error:", e); setLoading(false); });
@@ -900,7 +917,7 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
     const acct = accounts.find(a => a.id === id);
     if (!acct) return 0;
     const txTotal = transactions
-      .filter(t => t.accountId === id)
+      .filter(t => t.accountId === id && t.type !== "transfer")
       .reduce((s, t) => s + t.amount, 0);
     const transferOut = transfers
       .filter(t => t.fromAccountId === id)
@@ -908,7 +925,24 @@ export function DatabaseProvider({ children, userId }: { children: ReactNode; us
     const transferIn = transfers
       .filter(t => t.toAccountId === id)
       .reduce((s, t) => s + t.amountReceived, 0);
-    return (acct.openingBalance || 0) + txTotal - transferOut + transferIn;
+    // Calculate total credit card repayments made from this account
+    const ccRepaymentsTotal = creditCards.flatMap(c => c.repayments || []).filter(r => r && r.sourceAccountId === id).reduce((sum, r) => sum + r.amount, 0);
+
+    // Calculate total cash entries (deposits/withdrawals) for this account
+    const cashEntriesTotal = cashEntries.filter(ce => ce.linkedAccountId === id).reduce((sum, ce) => sum + ce.amount, 0);
+
+    return (acct.openingBalance || 0) + txTotal - transferOut + transferIn - ccRepaymentsTotal + cashEntriesTotal;
+  };
+
+  const getAccountAvailableBalance = (id: string): number => {
+    const currentBalance = getAccountBalance(id);
+    // Deduct any pending outgoing transfers that haven't been processed yet
+    // Assuming transfers are immediately deducted from available balance upon creation
+    const pendingOutgoingTransfers = transfers
+      .filter(t => t.fromAccountId === id)
+      .reduce((s, t) => s + t.amountSent + (t.fee || 0), 0);
+
+    return currentBalance - pendingOutgoingTransfers;
   };
 
   const db: DB = {

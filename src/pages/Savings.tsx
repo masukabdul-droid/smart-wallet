@@ -14,7 +14,16 @@ const COLOR_OPTIONS = ["hsl(160, 84%, 39%)","hsl(200, 80%, 50%)","hsl(280, 70%, 
 const SAVINGS_TYPES = [{ id:"regular", label:"Regular Savings" },{ id:"national_bond", label:"UAE National Bond" },{ id:"ifarmer", label:"iFarmer BD" },{ id:"wegro", label:"Wegro" },{ id:"biniyog", label:"Biniyog BD" },{ id:"other", label:"Other" }];
 const ROI_TYPES = [{ id:"percentage", label:"Fixed %" },{ id:"monthly_fixed", label:"Monthly Interest" },{ id:"quarterly", label:"Quarterly" },{ id:"yearly", label:"Yearly" },{ id:"fixed_year", label:"Fixed Year" },{ id:"moving_roi", label:"Variable ROI" },{ id:"not_guaranteed", label:"Not Guaranteed" }];
 const EMPTY_GOAL: any = { name:"", type:"regular", target:"", current:"0", monthly:"", color:COLOR_OPTIONS[0], platform:"", interestRate:"", roiType:"percentage", startDate:new Date().toISOString().slice(0,10), maturityDate:"", notes:"", linkedAccountId:"", autoPayEnabled:false, autoPayAccountId:"", autoPayCreditCardId:"", autoPayFrequency:"monthly", autoPayStartDate:new Date().toISOString().slice(0,10) };
-const EMPTY_TX = { date:new Date().toISOString().slice(0,10), amount:"", type:"deposit" as "deposit"|"withdrawal"|"profit", note:"", fromAccountId:"" };
+const EMPTY_TX = {
+  date:new Date().toISOString().slice(0,10),
+  amount:"",
+  type:"deposit" as "deposit"|"withdrawal"|"profit",
+  note:"",
+  fromAccountId:"",
+  toAccountId:"",
+  toCreditCardId:"",
+  fees:""
+};
 const EMPTY_FD: any = { bank:"", amount:"", rate:"", tenure:"12 months", maturity:"", currency:"AED", linkedAccountId:"", notes:"", reminderDays:"7", accountId:"" };
 
 export default function Savings() {
@@ -51,14 +60,68 @@ export default function Savings() {
 
   const openTx = (id: string) => { setTxGoalId(id); setTxForm(EMPTY_TX); setTxOpen(true); };
   const handleSaveTx = () => {
-    const amt = parseFloat(txForm.amount); if (!amt||amt<=0) return;
-    const signed = txForm.type==="withdrawal" ? -amt : amt;
-    addSavingsTx(txGoalId, { date:txForm.date, amount:signed, type:txForm.type, note:txForm.note, fromAccountId:txForm.fromAccountId||undefined });
-    if (txForm.fromAccountId&&txForm.type==="deposit") {
-      const g = savingsGoals.find(g=>g.id===txGoalId);
-      addTransaction({ name:`Savings: ${g?.name||"Goal"}`, amount:-amt, type:"expense", category:"Transfer", accountId:txForm.fromAccountId, date:txForm.date });
-    }
-    setTxOpen(false);
+  const amt = parseFloat(txForm.amount);
+  if (!amt || amt <= 0) return;
+
+  const fees = parseFloat(txForm.fees || "0");
+  const signed = txForm.type === "withdrawal" ? -amt : amt;
+
+  addSavingsTx(txGoalId, {
+    date: txForm.date,
+    amount: signed,
+    type: txForm.type,
+    note: txForm.note,
+    fromAccountId: txForm.fromAccountId || undefined,
+    toAccountId:txForm.toAccountId||undefined,
+    // toAccountId: txForm.toAccountId || undefined,
+    toCreditCardId: txForm.toCreditCardId || undefined,
+    fees
+  });
+
+  const g = savingsGoals.find(g => g.id === txGoalId);
+
+  // DEPOSIT FROM BANK
+  if (txForm.type === "deposit" && txForm.fromAccountId) {
+    addTransaction({
+      name: `Savings Deposit: ${g?.name || "Goal"}`,
+      amount: -amt,
+      type: "expense",
+      category: "Transfer",
+      accountId: txForm.fromAccountId,
+      date: txForm.date
+    });
+  }
+
+  // WITHDRAWAL TO BANK
+if (txForm.type === "withdrawal") {
+
+  // reduce savings
+  addSavingsTx(txGoalId,{
+    date:txForm.date,
+    amount:-amt,
+    type:"withdrawal",
+    note:txForm.note,
+    toAccountId:txForm.toAccountId || undefined,
+    toCreditCardId:txForm.toCreditCardId || undefined
+  })
+
+  const g = savingsGoals.find(g=>g.id===txGoalId)
+
+  // move money to bank
+  if(txForm.toAccountId){
+    addTransaction({
+      name:`Savings Withdrawal: ${g?.name || "Goal"}`,
+      amount:amt,
+      type:"income",
+      category:"Transfer",
+      accountId:txForm.toAccountId,
+      date:txForm.date
+    })
+  }
+
+}
+
+  setTxOpen(false);
   };
 
   const handleEditTx = () => {
@@ -72,11 +135,42 @@ export default function Savings() {
     setEditTxId(null);
   };
   const handleDeleteTx = (goalId:string, txId:string) => {
-    const g = savingsGoals.find(g=>g.id===goalId); if (!g) return;
-    const newTxs = (g.transactions||[]).filter((t:any)=>t.id!==txId);
-    const newCurrent = newTxs.reduce((s:number,t:any)=>s+t.amount,0);
-    updateSavingsGoal(goalId,{transactions:newTxs,current:newCurrent});
-  };
+  const g = savingsGoals.find(g=>g.id===goalId);
+  if (!g) return;
+
+  const tx = (g.transactions||[]).find((t:any)=>t.id===txId);
+
+  if (tx?.fromAccountId && tx.type==="deposit") {
+    addTransaction({
+      name:`Reversal Savings Deposit`,
+      amount:Math.abs(tx.amount),
+      type:"income",
+      category:"Transfer",
+      accountId:tx.fromAccountId,
+      date:new Date().toISOString().slice(0,10)
+    });
+  }
+
+  if (tx?.toAccountId && tx.type==="withdrawal") {
+    addTransaction({
+      name:`Reversal Savings Withdrawal`,
+      amount:-Math.abs(tx.amount),
+      type:"expense",
+      category:"Transfer",
+      accountId:tx.toAccountId,
+      date:new Date().toISOString().slice(0,10)
+    });
+  }
+
+  const newTxs = (g.transactions||[]).filter((t:any)=>t.id!==txId);
+
+  const newCurrent = newTxs.reduce((s:number,t:any)=>s+t.amount,0);
+
+  updateSavingsGoal(goalId,{
+    transactions:newTxs,
+    current:newCurrent
+  });
+};
   const openFDAdd = () => { setEditFD(null); setFdForm(EMPTY_FD); setFdOpen(true); };
   const openFDEdit = (fd: FixedDeposit) => { setEditFD(fd); setFdForm({ bank:fd.bank, amount:String(fd.amount), rate:String(fd.rate), tenure:fd.tenure, maturity:fd.maturity, currency:fd.currency, linkedAccountId:fd.linkedAccountId||"", notes:fd.notes||"", reminderDays:String(fd.reminderDays||7), accountId:fd.accountId||"" }); setFdOpen(true); };
   const handleSaveFD = () => {
@@ -134,7 +228,67 @@ export default function Savings() {
                 <div><p className="text-muted-foreground">Monthly</p><p className="font-semibold">AED {goal.monthly.toLocaleString()}</p></div>
               </div>
               <div><div className="flex justify-between text-[10px] text-muted-foreground mb-1"><span>{pct.toFixed(1)}%</span><span>{goal.current.toLocaleString()} / {goal.target.toLocaleString()}</span></div><div className="w-full bg-secondary rounded-full h-1.5"><div className="h-1.5 rounded-full" style={{width:`${pct}%`,backgroundColor:goal.color}}/></div></div>
-              {(goal.transactions||[]).length>0&&(<><button onClick={()=>setExpanded(isExp?null:goal.id)} className="mt-2 w-full flex items-center justify-between text-[10px] text-muted-foreground hover:text-foreground"><span>History ({goal.transactions.length})</span>{isExp?<ChevronUp className="w-3.5 h-3.5"/>:<ChevronDown className="w-3.5 h-3.5"/>}</button><AnimatePresence>{isExp&&(<motion.div initial={{height:0,opacity:0}} animate={{height:"auto",opacity:1}} exit={{height:0,opacity:0}} className="overflow-hidden"><div className="mt-2 space-y-1 max-h-40 overflow-y-auto border-t border-border pt-2">{[...goal.transactions].reverse().map(tx=>(<div key={tx.id} className="flex items-center justify-between text-xs py-1 border-b border-border/30 last:border-0"><div><p className="text-foreground">{tx.note}</p><p className="text-muted-foreground">{tx.date}</p></div><span className={`font-semibold ${tx.amount>=0?"stat-up":"stat-down"}`}>{tx.amount>=0?"+":""}AED {Math.abs(tx.amount).toLocaleString()}</span></div>))}</div></motion.div>)}</AnimatePresence></>)}
+              {(goal.transactions||[]).length>0&&(<><button onClick={()=>setExpanded(isExp?null:goal.id)} className="mt-2 w-full flex items-center justify-between text-[10px] text-muted-foreground hover:text-foreground">
+              <span>History ({goal.transactions.length})</span>{isExp?<ChevronUp className="w-3.5 h-3.5"/>:<ChevronDown className="w-3.5 h-3.5"/>}</button><AnimatePresence>{isExp&&(<motion.div initial={{height:0,opacity:0}} animate={{height:"auto",opacity:1}} exit={{height:0,opacity:0}}
+              className="overflow-hidden"><div className="mt-2 space-y-1 max-h-40 overflow-y-auto border-t border-border pt-2">
+              {[...goal.transactions].reverse().map(tx=>(<div key={tx.id} className="flex items-center justify-between text-xs py-1 border-b border-border/30 last:border-0">
+
+    <div>
+      <p className="text-foreground">{tx.note}</p>
+
+<p className="text-muted-foreground">{tx.date}</p>
+
+{tx.fromAccountId && (
+  <p className="text-[10px] text-blue-400">
+    From: {accounts.find(a=>a.id===tx.fromAccountId)?.name}
+  </p>
+)}
+
+{tx.toAccountId && (
+  <p className="text-[10px] text-green-400">
+    To: {accounts.find(a=>a.id===tx.toAccountId)?.name}
+  </p>
+)}
+
+{tx.toCreditCardId && (
+  <p className="text-[10px] text-purple-400">
+    To CC: {creditCards.find(c=>c.id===tx.toCreditCardId)?.name}
+  </p>
+)}
+    </div>
+
+    <div className="flex items-center gap-2">
+
+      <span className={`font-semibold ${tx.amount>=0?"stat-up":"stat-down"}`}>
+        {tx.amount>=0?"+":""}AED {Math.abs(tx.amount).toLocaleString()}
+      </span>
+
+      <button
+        onClick={()=>{
+          setEditTxGoalId(goal.id)
+          setEditTxId(tx.id)
+          setEditTxForm({
+            date:tx.date,
+            amount:String(Math.abs(tx.amount)),
+            type:tx.type,
+            note:tx.note
+          })
+        }}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        <Edit2 className="w-3 h-3"/>
+      </button>
+
+      <button
+        onClick={()=>handleDeleteTx(goal.id, tx.id)}
+        className="text-muted-foreground hover:text-destructive"
+      >
+        <Trash2 className="w-3 h-3"/>
+      </button>
+
+    </div>
+
+  </div>))}</div></motion.div>)}</AnimatePresence></>)}
             </motion.div>);
           })}
         </div>
@@ -234,11 +388,137 @@ export default function Savings() {
               <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={txForm.date} onChange={e=>setTxForm(f=>({...f,date:e.target.value}))} className="bg-background border-border"/></div>
             </div>
             {txForm.type==="deposit"&&(<div className="space-y-1.5"><Label>From Account</Label><Select value={txForm.fromAccountId||"_none"} onValueChange={v=>setTxForm(f=>({...f,fromAccountId:v==="_none"?"":v}))}><SelectTrigger className="bg-background border-border"><SelectValue placeholder="Manual / External"/></SelectTrigger><SelectContent><SelectItem value="_none">Manual</SelectItem>{accounts.map(a=><SelectItem key={a.id} value={a.id}>{a.name} ({a.currency} {getAccountBalance(a.id).toLocaleString()})</SelectItem>)}</SelectContent></Select></div>)}
+           {txForm.type==="withdrawal" && (
+<div className="space-y-1.5">
+<Label>To Account</Label>
+<Select
+value={txForm.toAccountId||"_none"}
+onValueChange={v=>setTxForm(f=>({...f,toAccountId:v==="_none"?"":v}))}
+>
+<SelectTrigger className="bg-background border-border">
+<SelectValue placeholder="Select account"/>
+</SelectTrigger>
+
+<SelectContent>
+<SelectItem value="_none">None</SelectItem>
+{accounts.map(a=>(
+<SelectItem key={a.id} value={a.id}>
+{a.name} ({a.currency} {getAccountBalance(a.id).toLocaleString()})
+</SelectItem>
+))}
+</SelectContent>
+</Select>
+</div>
+)}
+
+ {txForm.type==="withdrawal" && (
+<div className="space-y-1.5">
+<Label>To Account</Label>
+<Select
+value={txForm.toAccountId||"_none"}
+onValueChange={v=>setTxForm(f=>({...f,toAccountId:v==="_none"?"":v}))}
+>
+<SelectTrigger className="bg-background border-border">
+<SelectValue placeholder="Select account"/>
+</SelectTrigger>
+
+<SelectContent>
+<SelectItem value="_none">None</SelectItem>
+{accounts.map(a=>(
+<SelectItem key={a.id} value={a.id}>
+{a.name} ({a.currency} {getAccountBalance(a.id).toLocaleString()})
+</SelectItem>
+))}
+</SelectContent>
+</Select>
+</div>
+)}          
+           
             <div className="space-y-1.5"><Label>Note</Label><Input value={txForm.note} onChange={e=>setTxForm(f=>({...f,note:e.target.value}))} placeholder="Monthly deposit" className="bg-background border-border"/></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={()=>setTxOpen(false)}>Cancel</Button><Button onClick={handleSaveTx} disabled={!txForm.amount}>Add</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+{/* Edit Transaction history */}
+
+<Dialog open={!!editTxId} onOpenChange={()=>setEditTxId(null)}>
+  <DialogContent className="w-full sm:max-w-sm bg-card border-border">
+    <DialogHeader>
+      <DialogTitle>Edit Savings Transaction</DialogTitle>
+    </DialogHeader>
+
+    <div className="space-y-3 py-2">
+
+      <div className="grid grid-cols-3 gap-2">
+        {(["deposit","withdrawal","profit"] as const).map(t=>(
+          <button
+            key={t}
+            onClick={()=>setEditTxForm(f=>({...f,type:t}))}
+            className={`py-2 rounded-lg text-xs border capitalize ${
+              editTxForm.type===t
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>Amount (AED)</Label>
+          <Input
+            type="number"
+            value={editTxForm.amount}
+            onChange={e=>setEditTxForm(f=>({...f,amount:e.target.value}))}
+            className="bg-background border-border"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Date</Label>
+          <Input
+            type="date"
+            value={editTxForm.date}
+            onChange={e=>setEditTxForm(f=>({...f,date:e.target.value}))}
+            className="bg-background border-border"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Note</Label>
+        <Input
+          value={editTxForm.note}
+          onChange={e=>setEditTxForm(f=>({...f,note:e.target.value}))}
+          className="bg-background border-border"
+        />
+      </div>
+
+    </div>
+
+    <DialogFooter>
+      <Button variant="outline" onClick={()=>setEditTxId(null)}>
+        Cancel
+      </Button>
+
+      <Button
+        onClick={()=>{
+          handleEditTx()
+        }}
+        disabled={!editTxForm.amount}
+      >
+        Save Changes
+      </Button>
+    </DialogFooter>
+
+  </DialogContent>
+</Dialog>
+
+
+
 
       {/* Add/Edit Fixed Deposit */}
       <Dialog open={fdOpen} onOpenChange={setFdOpen}>

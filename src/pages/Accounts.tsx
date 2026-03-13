@@ -41,8 +41,19 @@ export default function Accounts() {
     const acGoals = goals.filter(g=>g.linkedAccountId===selectedAccId||g.transactions.some(gt=>gt.fromAccountId===selectedAccId));
     const acBiz = businesses.filter(b=>b.transactions.some(bt=>bt.accountId===selectedAccId));
     const acRepayments = creditCards.flatMap(c=>(c.repayments||[]).filter(r=>r.sourceAccountId===selectedAccId).map(r=>({...r,cardName:c.name})));
-    const totalIn = acTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-    const totalOut = acTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    
+    // Updated calculation logic:
+    // Total In: Transactions > 0 + Incoming Transfers
+    const txIn = acTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const transferIn = acTransfers.filter(t=>t.toAccountId===selectedAccId).reduce((s,t)=>s+t.amountReceived,0);
+    const totalIn = txIn + transferIn;
+
+    // Total Out: Transactions < 0 + Outgoing Transfers + Fees from Transfers
+    const txOut = acTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    const transferOut = acTransfers.filter(t=>t.fromAccountId===selectedAccId).reduce((s,t)=>s+t.amountSent,0);
+    const transferFees = acTransfers.filter(t=>t.fromAccountId===selectedAccId).reduce((s,t)=>(t as any).fee?s+(t as any).fee:s,0);
+    const totalOut = txOut + transferOut + transferFees;
+
     return { acTxs, acTransfers, acLoans, acSavings, acGoals, acBiz, acRepayments, totalIn, totalOut };
   }, [selectedAccId, transactions, transfers, loans, savingsGoals, goals, businesses, creditCards]);
 
@@ -76,8 +87,14 @@ export default function Accounts() {
             <div className="space-y-1 max-h-56 overflow-y-auto">
               {accDetail.acTxs.slice(0,30).map(t=>(
                 <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/40 last:border-0">
-                  <div><p className="text-xs font-medium text-foreground">{t.name}</p><p className="text-[10px] text-muted-foreground">{t.category} · {t.date}</p></div>
-                  <span className={`text-xs font-semibold ${t.amount>=0?"stat-up":"stat-down"}`}>{t.amount>=0?"+":""}{selectedAcc.currency} {Math.abs(t.amount).toLocaleString()}</span>
+                  <div>
+                    <p className="text-xs font-medium text-foreground">{t.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{t.category} · {t.date}</p>
+                    {(t as any).fee > 0 && <p className="text-[9px] text-muted-foreground italic">Fee: {selectedAcc.currency} {(t as any).fee}</p>}
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-xs font-semibold ${t.amount>=0?"stat-up":"stat-down"}`}>{t.amount>=0?"+":""}{selectedAcc.currency} {Math.abs(t.amount).toLocaleString()}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -90,10 +107,17 @@ export default function Accounts() {
               {accDetail.acTransfers.map(t=>{
                 const isFrom = t.fromAccountId===selectedAccId;
                 const other = accounts.find(a=>a.id===(isFrom?t.toAccountId:t.fromAccountId));
+                const fee = (t as any).fee || 0;
                 return (
                   <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/40 last:border-0">
-                    <div><p className="text-xs font-medium text-foreground">{isFrom?"→ ":"← "}{other?.name||"External"}</p><p className="text-[10px] text-muted-foreground">{t.date}{t.notes?` · ${t.notes}`:""}</p></div>
-                    <span className={`text-xs font-semibold ${isFrom?"stat-down":"stat-up"}`}>{isFrom?"-":"+"}{isFrom?t.currencyFrom:t.currencyTo} {(isFrom?t.amountSent:t.amountReceived).toLocaleString()}</span>
+                    <div>
+                      <p className="text-xs font-medium text-foreground">{isFrom?"→ ":"← "}{other?.name||"External"}</p>
+                      <p className="text-[10px] text-muted-foreground">{t.date}{t.notes?` · ${t.notes}`:""}</p>
+                      {isFrom && fee > 0 && <p className="text-[9px] text-muted-foreground italic">Fee: {t.currencyFrom} {fee}</p>}
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-xs font-semibold ${isFrom?"stat-down":"stat-up"}`}>{isFrom?"-":"+"}{isFrom?t.currencyFrom:t.currencyTo} {(isFrom?t.amountSent:t.amountReceived).toLocaleString()}</span>
+                    </div>
                   </div>
                 );
               })}
@@ -175,9 +199,9 @@ export default function Accounts() {
             const Icon = TYPE_ICONS[acc.type]??Wallet;
             const txCount = transactions.filter(t=>t.accountId===acc.id).length;
             return (
-              <motion.div key={acc.id} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0}} transition={{delay:i*0.05}}
-                className="glass-card-hover p-5 group cursor-pointer" onClick={()=>setSelectedAccId(acc.id)}>
-                <div className="flex items-center justify-between mb-4">
+              <motion.div key={acc.id} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} exit={{opacity:0,scale:0.95}} transition={{delay:i*0.05}}
+                onClick={()=>setSelectedAccId(acc.id)} className="glass-card p-4 group cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{backgroundColor:`${acc.color}25`}}><Icon className="w-5 h-5" style={{color:acc.color}}/></div>
                     <div><p className="text-sm font-semibold text-foreground">{acc.name}</p><p className="text-xs text-muted-foreground">{acc.bank} · {acc.type}</p></div>
